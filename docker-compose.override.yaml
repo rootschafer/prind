@@ -5,33 +5,28 @@ services:
     image: rust:1-bookworm
     working_dir: /work
     restart: unless-stopped
-    # builder-only; no device access needed
+    privileged: true
     environment:
       - RK_MCU_SLAVE_PATH_FILE=/opt/printer_data/run/mcu_slave_path
     command: >
-      sh -c "set -e; rustc --version || true; cargo build -p rk-mcu --features simulator; tail -f /dev/null"
+      sh -c "cargo run -p rk-mcu --features simulator &
+      while [ ! -s /opt/printer_data/run/mcu_slave_path ]; do sleep 0.1; done;
+      PTY=$(cat /opt/printer_data/run/mcu_slave_path);
+      [ -n \"$PTY\" ] && chmod 666 \"$PTY\" || true;
+      [ -n \"$PTY\" ] && ln -sf \"$PTY\" /opt/printer_data/run/klipper_host_mcu.tty || true;
+      tail -f /dev/null"
     volumes:
       - ../../:/work
+      - run:/opt/printer_data/run
+      - /dev:/dev
     profiles:
       - mainsail
 
   klipper:
-    tty: true
-    volumes:
-      - /dev:/dev
-      - ../../:/work
-    entrypoint: ["/bin/sh","/work/external/prind/klipper-entry.sh"]
-    logging:
-      driver: json-file
+    user: root
+    group_add:
+      - tty
+    pid: "service:rk-mcu-sim"
     depends_on:
-      init:
-        condition: service_started
       rk-mcu-sim:
-        condition: service_started
-
-  moonraker:
-    depends_on:
-      init:
-        condition: service_started
-      klipper:
         condition: service_started
